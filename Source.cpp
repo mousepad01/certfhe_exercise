@@ -59,6 +59,12 @@ public:
 
 	FHEuint & operator = (const FHEuint & toCopy);
 
+	// voi returna o referinta la rezultatul care sta in heap
+	// pentru a evita copierea unui rezultat de dimensiune mare
+	FHEuint & operator * (const FHEuint & snd) const;
+
+	FHEuint & operator *= (const FHEuint & snd);
+
 	// voi decripta pe rand fiecare dintre cifrele in baza 2, delimitate cu digitLen
 	// pentru decriptare voi folosi o versiune modificata a functiei decrypt 
 	// din fisierul sursa original SecretKey.cpp, linia 104
@@ -71,7 +77,7 @@ public:
 
 	// responsabilitatea caller ului sa se asigure ca fst si snd 
 	// au fost criptate in acelasi context
-	friend FHEuint * multiply(FHEuint * fst, FHEuint * snd);
+	friend FHEuint * multiply(const FHEuint * fst, const FHEuint * snd);
 };
 
 uint64_t FHEuint::decrypt(uint64_t* v, uint64_t len, uint64_t defLen, uint64_t n, uint64_t d, uint64_t* s, uint64_t* bitlen, uint64_t * carry) {
@@ -154,12 +160,14 @@ FHEuint::FHEuint(uint64_t toConvert, SecretKey * sk, Context * ct) {
 FHEuint & FHEuint::operator = (const FHEuint & toCopy) {
 
 	// posibil bug in overload pe = si in setcontext in Ciphertext.cpp
-	// concluzie: aici va crapa daca incerc sa fac o atribuire unui FHEuint care are context deja initializat
+	// concluzie: va trebui sa copiez continutul contextului fiecarui FHEuint pe rand
+	// intrucat ar aparea probleme la folosirea directa a operatorului de atribuire
+	//
+	// stergerea valorilor vechi este realizata de setterii corespunzatori din clasa Ciphertext
+	this -> c.setValues(toCopy.c.getValues(), toCopy.c.getLen());
+	this -> c.setBitlen(toCopy.c.getBitlen(), toCopy.c.getLen());
+	this -> c.setContext(toCopy.c.getContext());  
 
-	this -> c = toCopy.c;
-	this -> c.setContext(toCopy.c.getContext());  // la copierea Ciphertext, 
-												  // nu se copiaza si contextul
-												  // trebuie sa il copiez manual
 	this -> digitLen = toCopy.digitLen;
 
 	return *this;
@@ -249,7 +257,7 @@ void FHEuint::showDigits(SecretKey * sk) {
 	}
 }
 
-FHEuint * multiply(FHEuint * fst, FHEuint * snd) {
+FHEuint * multiply(const FHEuint * fst, const FHEuint * snd) {
 
 	// initializari de vaariabile auxiliare
 
@@ -357,43 +365,57 @@ FHEuint * multiply(FHEuint * fst, FHEuint * snd) {
 	return rez;
 }
 
-void test() {
+FHEuint & FHEuint::operator * (const FHEuint & snd) const {
 
-	for (int t = 0; t < 1000; t++) {
+	FHEuint * rez = multiply(this, &snd);
+	return *rez;
+}
 
-		int paramcnt = 7;
-		uint64_t * val = new uint64_t[paramcnt];
+/* consumul de memorie s-ar putea optimiza */
+FHEuint & FHEuint::operator *= (const FHEuint & snd) {
 
-		uint64_t realProd = 1;
+	FHEuint * rez = multiply(this, &snd);
 
-		for (int i = 0; i < paramcnt; i++) {
+	this -> c.setValues(rez -> c.getValues(), rez -> c.getLen());
+	this -> c.setBitlen(rez -> c.getBitlen(), rez -> c.getLen());
+	this -> c.setContext(rez -> c.getContext());
 
-			val[i] = rand() % 15;
-			realProd *= val[i];
-		}
+	this -> digitLen = rez -> digitLen;
 
-		FHEuint * fhearr = new FHEuint[paramcnt];
-		for (int i = 0; i < paramcnt; i++) {
+	delete rez;
+	
+	/* probleme de rezolvat cu atribuirea */
+	return *this;
+}
 
-			fhearr[i] = FHEuint(val[i], sek, ctt);
-		}
-		
-		for (int p = 1; p <= 3; p++) {
-			for (int i = 0; i < paramcnt; i += (1 << p)) {
+void multiplyTest() {
 
-				fhearr[i] = *multiply(&fhearr[i], &fhearr[i + (1 << p) - 1]);
-			}
-		}
+	for (int t = 0; t < 10; t++) {
 
-		uint64_t rez = fhearr[0].decrypt(sek);
+		uint64_t * nr = new uint64_t[20];
+		for (int i = 0; i < 8; i++)
+			nr[i] = rand() % 10;
 
-		if (rez != realProd) {
+		FHEuint * u = new FHEuint[20];
+		for (int i = 0; i < 8; i++)
+			u[i] = FHEuint(nr[i], sek, ctt);
 
-			std::cout << "real: " << realProd << ", rezultat: " << rez;
-			for (int i = 0; i < paramcnt; i++)
-				std::cout << val[i] << " ";
-			std::cout << '\n';
-		}
+		FHEuint * u2 = multiply(u, u + 1);
+		FHEuint * u3 = multiply(u + 2, u + 3);
+		FHEuint * u4 = multiply(u + 4, u + 5);
+		FHEuint * u5 = multiply(u + 6, u + 7);
+
+		FHEuint * u8 = multiply(u2, u3);
+		FHEuint * u9 = multiply(u4, u5);
+
+		FHEuint * u10 = multiply(u8, u9);
+
+		if (u10 -> decrypt(sek) != nr[0] * nr[1] * nr[2] * nr[3] * nr[4] * nr[5] * nr[6] * nr[7])
+			std::cout << "not ok\n";
+		else
+			std::cout << "ok\n";
+
+		//std::cout << u2 -> decrypt(sek) << " " << nr[0] * nr[1] << '\n';
 	}
 	std::cout << "done\n";
 }
@@ -407,16 +429,18 @@ int main() {
 	sek = &sk;
 	ctt = &context;
 
-	test();
-	FHEuint * x = new FHEuint;
-	FHEuint k(193, &sk, &context);
-	*x = k;
-	FHEuint y(9, &sk, &context);
+	// testMultiply();
+	FHEuint * x = new FHEuint(18, sek, ctt);
+	FHEuint k(100, &sk, &context);
+	*x *= k;
+	
+	std::cout << x -> decrypt(sek);
+	
 	
 
 	//std::cout << x.c.getContext().getDefaultN() << '\n';
 
-	FHEuint * z = multiply(x, &y);
+	//FHEuint * z = multiply(x, &y);
 	
 	/*int m = 10;
 	int n = 7;
