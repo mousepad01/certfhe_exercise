@@ -1,15 +1,12 @@
 #include <iostream>
 #include <vector>
 #include "certFHE.h"
-#include <random>
+#include <random> // pentru teste
 
 #define max(x, y) (x < y ? y : x)
 #define min(x, y) (x < y ? x : y)
 
 using namespace certFHE;
-
-SecretKey * sek; // de test
-Context * ctt; // de test
 
 // am conceput un model pentru operatii cu numere naturale
 //
@@ -23,7 +20,7 @@ Context * ctt; // de test
 // altele au sens sa fie folosite (in cea mai mare parte) de server
 class FHEuint {
 
-private:
+public:
 
 	Ciphertext c;				// ciphertext ul numarului (care contine cifrele in baza 2 ale numarului)
 
@@ -45,9 +42,10 @@ private:
 
 public:
 
+	//---------- CONSTRUCTORI & DESTRUCTORI ---------------
+
 	// constructor empty
-	FHEuint(){
-	}
+	FHEuint(){}
 
 	// constructor apelat (in mod normal) in client-side
 	// nu ne dorim ca serverul sa aiba cheia in memorie
@@ -57,6 +55,11 @@ public:
 	// constructor de copiere
 	FHEuint(const FHEuint & toCopy);
 
+	// destructor: va pune 0 in zona de memorie a vectorului digitLen dupa stergere
+	~FHEuint();
+
+	//---------- OVERLOAD OPERATORI ---------------
+
 	FHEuint & operator = (const FHEuint & toCopy);
 
 	// voi returna o referinta la rezultatul care sta in heap
@@ -64,6 +67,20 @@ public:
 	FHEuint & operator * (const FHEuint & snd) const;
 
 	FHEuint & operator *= (const FHEuint & snd);
+
+	// voi returna o referinta la rezultatul care sta in heap
+	// pentru a evita copierea unui rezultat de dimensiune mare
+	FHEuint & operator + (const FHEuint & snd) const;
+
+	FHEuint & operator += (const FHEuint & snd);
+
+	//---------- METODE PUBLICE ---------------
+
+	void permuteKey(const Permutation & p);
+
+	// voi returna o referinta la rezultatul care sta in heap
+	// pentru a evita copierea unui rezultat de dimensiune mare
+	FHEuint & getPermutedCopy(const Permutation & p); // const
 
 	// voi decripta pe rand fiecare dintre cifrele in baza 2, delimitate cu digitLen
 	// pentru decriptare voi folosi o versiune modificata a functiei decrypt 
@@ -73,17 +90,20 @@ public:
 	uint64_t decrypt(SecretKey * sk); 
 
 	// pentru afisarea decriptata a cifrelor
-	void showDigits(SecretKey * sk);
+	void showDigits(SecretKey * sk) const;
+
+	//---------- FUNCTII FRIEND ---------------
 
 	// responsabilitatea caller ului sa se asigure ca fst si snd 
 	// au fost criptate in acelasi context
-	friend FHEuint * multiply(const FHEuint * fst, const FHEuint * snd);
+	friend FHEuint * multiply (const FHEuint * fst, const FHEuint * snd);
+
+	// responsabilitatea caller ului sa se asigure ca fst si snd 
+	// au fost criptate in acelasi context
+	friend FHEuint * add (const FHEuint * fst, const FHEuint * snd);
 };
 
 uint64_t FHEuint::decrypt(uint64_t* v, uint64_t len, uint64_t defLen, uint64_t n, uint64_t d, uint64_t* s, uint64_t* bitlen, uint64_t * carry) {
-	//if (len == defLen)
-	//	return defaultN_decrypt(v, len, n, d, s, bitlen);
-
 
 	int totalLen = 0;
 	for (int i = 0; i < len; i++)
@@ -132,9 +152,6 @@ uint64_t FHEuint::decrypt(uint64_t* v, uint64_t len, uint64_t defLen, uint64_t n
 FHEuint::FHEuint(const FHEuint & toCopy) {
 
 	this -> c = toCopy.c;
-	this -> c.setContext(toCopy.c.getContext());  // la copierea Ciphertext, 
-												  // nu se copiaza si contextul
-												  // trebuie sa il copiez manual
 	this -> digitLen = toCopy.digitLen;
 }
 
@@ -157,20 +174,9 @@ FHEuint::FHEuint(uint64_t toConvert, SecretKey * sk, Context * ct) {
 	}
 }
 
-FHEuint & FHEuint::operator = (const FHEuint & toCopy) {
-
-	// posibil bug in overload pe = si in setcontext in Ciphertext.cpp
-	// concluzie: va trebui sa copiez continutul contextului fiecarui FHEuint pe rand
-	// intrucat ar aparea probleme la folosirea directa a operatorului de atribuire
-	//
-	// stergerea valorilor vechi este realizata de setterii corespunzatori din clasa Ciphertext
-	this -> c.setValues(toCopy.c.getValues(), toCopy.c.getLen());
-	this -> c.setBitlen(toCopy.c.getBitlen(), toCopy.c.getLen());
-	this -> c.setContext(toCopy.c.getContext());  
-
-	this -> digitLen = toCopy.digitLen;
-
-	return *this;
+FHEuint::~FHEuint() {
+	for (int i = 0; i < this -> digitLen.size(); i++)
+		digitLen[i] = 0;
 }
 
 uint64_t FHEuint::decrypt(SecretKey * sk) {
@@ -229,7 +235,20 @@ uint64_t FHEuint::decrypt(SecretKey * sk) {
 	return toReturn;
 }
 
-void FHEuint::showDigits(SecretKey * sk) {
+void FHEuint::permuteKey(const Permutation & p) {
+
+	this -> c.applyPermutation_inplace(p);
+}
+
+FHEuint & FHEuint::getPermutedCopy(const Permutation & p) {
+	
+	FHEuint * thisPermuted = new FHEuint(*this);
+	thisPermuted -> permuteKey(p);
+
+	return *thisPermuted;
+}
+
+void FHEuint::showDigits(SecretKey * sk) const {
 
 	int offset = 0;
 
@@ -255,6 +274,56 @@ void FHEuint::showDigits(SecretKey * sk) {
 
 		offset += digitLen[digit];
 	}
+}
+
+FHEuint & FHEuint::operator * (const FHEuint & snd) const {
+
+	FHEuint * rez = multiply(this, &snd);
+	return *rez;
+}
+
+FHEuint & FHEuint::operator = (const FHEuint & toCopy) {
+
+	/*this -> c.setValues(toCopy.c.getValues(), toCopy.c.getLen());
+	this -> c.setBitlen(toCopy.c.getBitlen(), toCopy.c.getLen());
+	this -> c.setContext(toCopy.c.getContext());*/
+
+	this -> c = toCopy.c;
+	this -> digitLen = toCopy.digitLen;
+
+	return *this;
+}
+
+/* consumul de memorie s-ar putea optimiza */
+FHEuint & FHEuint::operator *= (const FHEuint & snd) {
+
+	FHEuint * rez = multiply(this, &snd);
+
+	this -> c = rez -> c;
+	this -> digitLen = rez -> digitLen;
+
+	delete rez;
+	
+	return *this;
+}
+
+FHEuint & FHEuint::operator + (const FHEuint & snd) const {
+
+	FHEuint * rez = add(this, &snd);
+	return *rez;
+}
+
+/* consumul de memorie s-ar putea optimiza */
+FHEuint & FHEuint::operator += (const FHEuint & snd) {
+
+	FHEuint * rez = add(this, &snd);
+
+	this -> c = rez -> c;
+	this -> digitLen = rez -> digitLen;
+
+	delete rez;
+
+	return *this;
 }
 
 FHEuint * multiply(const FHEuint * fst, const FHEuint * snd) {
@@ -285,7 +354,7 @@ FHEuint * multiply(const FHEuint * fst, const FHEuint * snd) {
 	// DigitLen furnizeaza numai lungimea fiecarei cifre 
 	// DigitLenPartialSum furnizeaza pozitia de inceput a fiecarei cifre
 	// (pozitie exprimata in nr de chunks de lungime defLen de la inceputul chiphertextului)
-	
+
 	fstDigitLenPartialSum[0] = 0;
 	for (int i = 1; i < fstDigitLenPartialSum.size(); i++)
 		fstDigitLenPartialSum[i] = fstDigitLenPartialSum[i - 1] + (fst -> digitLen[i - 1]);
@@ -293,7 +362,7 @@ FHEuint * multiply(const FHEuint * fst, const FHEuint * snd) {
 	sndDigitLenPartialSum[0] = 0;
 	for (int i = 1; i < sndDigitLenPartialSum.size(); i++)
 		sndDigitLenPartialSum[i] = sndDigitLenPartialSum[i - 1] + (snd -> digitLen[i - 1]);
-	
+
 	// realizarea inmultirii
 	// for urile sunt plasate a.i. adunarea produselor intermediare sa necesite 
 	//                             cat mai putine structuri auxiliare
@@ -301,16 +370,12 @@ FHEuint * multiply(const FHEuint * fst, const FHEuint * snd) {
 	int n = fstDigitLenPartialSum.size();
 	int m = sndDigitLenPartialSum.size();
 
-	//std::cout << " n si m " << n << " " << m << "\n\n";
-
 	for (int rezDigit = 0; rezDigit < m + n; rezDigit++) {
 
 		for (int fstDigit = max(0, rezDigit - m - 1); fstDigit <= min(n - 1, rezDigit); fstDigit++)
 			for (int sndDigit = min(m - 1, rezDigit); sndDigit >= max(0, rezDigit - n - 1); sndDigit--)
-				
-				if (fstDigit + sndDigit == rezDigit) {
 
-					//std::cout << " fstd sndd " << fstDigit << " " << sndDigit << '\n';
+				if (fstDigit + sndDigit == rezDigit) {
 
 					for (int i = 0; i < fst -> digitLen[fstDigit]; i++) {
 						for (int j = 0; j < snd -> digitLen[sndDigit]; j++) {
@@ -321,34 +386,10 @@ FHEuint * multiply(const FHEuint * fst, const FHEuint * snd) {
 							fstaux.setValues(fstv + offsetFst * defLen, defLen);
 							fstaux.setBitlen(fstbl + offsetFst * defLen, defLen);
 
-							//std::cout << "offsetFst offsetSnd " << offsetFst << " " << offsetSnd << '\n';
-							//----
-							/*Ciphertext ac;
-							ac.setContext(fst -> c.getContext());
-							ac.setValues(fstaux.getValues(), defLen);
-							ac.setBitlen(fstaux.getBitlen(), defLen);
-
-							std::cout << " fst val: " << sek -> decrypt(ac);*/
-							//----
-
 							sndaux.setValues(sndv + offsetSnd * defLen, defLen);
 							sndaux.setBitlen(sndbl + offsetSnd * defLen, defLen);
 
-							//----
-							/*ac.setValues(sndaux.getValues(), defLen);
-							ac.setBitlen(sndaux.getBitlen(), defLen);
-
-							std::cout << " snd val: " << sek -> decrypt(ac);*/
-							//----
-
 							fstaux *= sndaux;
-
-							//----
-							/*ac.setValues(fstaux.getValues(), defLen);
-							ac.setBitlen(fstaux.getBitlen(), defLen);
-
-							std::cout << " decriptat: " << sek -> decrypt(ac) << '\n';*/
-							//----
 
 							rez -> c += fstaux;
 
@@ -365,30 +406,63 @@ FHEuint * multiply(const FHEuint * fst, const FHEuint * snd) {
 	return rez;
 }
 
-FHEuint & FHEuint::operator * (const FHEuint & snd) const {
+FHEuint * add(const FHEuint * fst, const FHEuint * snd) {
 
-	FHEuint * rez = multiply(this, &snd);
-	return *rez;
+	FHEuint * rez = new FHEuint();				// rezultatul adunarii
+	rez -> c.setContext(fst -> c.getContext());
+
+	uint64_t * fstv = fst -> c.getValues();		// ciphertext ul primului nr
+	uint64_t * sndv = snd -> c.getValues();		// ciphertext ul celui de al doilea nr
+
+	uint64_t * fstbl = fst -> c.getBitlen();	// bitlen corespunzator primului nr
+	uint64_t * sndbl = snd -> c.getBitlen();	// bitlen corespunzator celui de al doiela nr
+
+	int fstDlen = fst -> digitLen.size();
+	int sndDlen = snd -> digitLen.size();
+
+	rez -> digitLen = std::vector<int>(max(fstDlen, sndDlen));
+
+	int offsetFst = 0;
+	int offsetSnd = 0;
+
+	Ciphertext aux;							// ciphertext auxiliar folosite in adunare
+	aux.setContext(fst -> c.getContext());
+
+	uint64_t defLen = fst -> c.getContext().getDefaultN();	// dimensiunea unui chunk de ciphertext
+
+	for (int digit = 0; digit < rez -> digitLen.size(); digit++) {
+
+		rez -> digitLen[digit] = 0;
+
+		if (digit < fstDlen) {
+
+			aux.setValues(fstv + offsetFst * defLen, defLen * (fst -> digitLen[digit]));
+			aux.setBitlen(fstbl + offsetFst * defLen, defLen * (fst -> digitLen[digit]));
+
+			rez -> c += aux;
+
+			rez -> digitLen[digit] += fst -> digitLen[digit];
+			offsetFst += fst -> digitLen[digit];
+		}
+
+		if (digit < sndDlen) {
+
+			aux.setValues(sndv + offsetSnd * defLen, defLen * (snd -> digitLen[digit]));
+			aux.setBitlen(sndbl + offsetSnd * defLen, defLen * (snd -> digitLen[digit]));
+
+			rez -> c += aux;
+
+			rez -> digitLen[digit] += snd -> digitLen[digit];
+			offsetSnd += snd -> digitLen[digit];
+		}
+	}
+
+	return rez;
 }
 
-/* consumul de memorie s-ar putea optimiza */
-FHEuint & FHEuint::operator *= (const FHEuint & snd) {
+//--------------- TESTE ----------------
 
-	FHEuint * rez = multiply(this, &snd);
-
-	this -> c.setValues(rez -> c.getValues(), rez -> c.getLen());
-	this -> c.setBitlen(rez -> c.getBitlen(), rez -> c.getLen());
-	this -> c.setContext(rez -> c.getContext());
-
-	this -> digitLen = rez -> digitLen;
-
-	delete rez;
-	
-	/* probleme de rezolvat cu atribuirea */
-	return *this;
-}
-
-void multiplyTest() {
+void multiplyTest(SecretKey * sek, SecretKey * sekp, Context * ctt,Permutation * perm) {
 
 	for (int t = 0; t < 10; t++) {
 
@@ -420,39 +494,167 @@ void multiplyTest() {
 	std::cout << "done\n";
 }
 
+void addTest(SecretKey * sek, SecretKey * sekp, Context * ctt, Permutation * perm) {
+
+	for (int t = 0; t < 100; t++) {
+
+		uint64_t * nr = new uint64_t[16];
+
+		FHEuint * u = new FHEuint[16];
+
+		for (int i = 0; i < 16; i++) {
+
+			nr[i] = rand();
+			u[i] = FHEuint(nr[i], sek, ctt);
+		}
+
+		FHEuint * u1 = add(u, u + 1);
+		FHEuint * u2 = add(u + 2, u + 3);
+		FHEuint * u3 = add(u + 4, u + 5);
+		FHEuint * u4 = add(u + 6, u + 7);
+		FHEuint * u5 = add(u + 8, u + 9);
+		FHEuint * u6 = add(u + 10, u + 11);
+
+		FHEuint * u7 = add(u1, u2);
+		FHEuint * u8 = add(u3, u4);
+		FHEuint * u9 = add(u5, u6);
+		
+		FHEuint * u10 = add(u7, u8);
+		FHEuint * u11 = add(u10, u9);
+
+		uint64_t realSum = 0;
+		for (int i = 0; i < 12; i++)
+			realSum += nr[i];
+
+		if (u11 -> decrypt(sek) != realSum)
+			std::cout << "problem\n";
+		else
+			std::cout << "ok\n";
+
+		//std::cout << u11 -> decrypt(sek) << " " << realSum;
+	}
+
+	std::cout << "done\n";
+}
+
+void addMulTest(SecretKey * sek, SecretKey * sekp, Context * ctt, Permutation * perm) {
+
+	for (int t = 0; t < 2; t++) {
+
+		uint64_t * nr = new uint64_t[16];
+
+		FHEuint * u = new FHEuint[16];
+
+		for (int i = 0; i < 16; i++) {
+
+			nr[i] = rand() % 100;
+			u[i] = FHEuint(nr[i], sek, ctt);
+		}
+
+		FHEuint * u1 = add(u, u + 1);
+		FHEuint * u2 = add(u + 2, u + 3);
+		FHEuint * u3 = add(u + 4, u + 5);
+		FHEuint * u4 = add(u + 6, u + 7);
+		FHEuint * u5 = add(u + 8, u + 9);
+		FHEuint * u6 = add(u + 10, u + 11);
+
+		FHEuint * u7 = add(u1, u2);
+		FHEuint * u8 = add(u3, u4);
+		FHEuint * u9 = add(u5, u6);
+
+		FHEuint * u10 = add(u7, u8);
+		FHEuint * u11 = add(u10, u9);
+
+		//*u10 *= *u3;
+		*u11 *= *u5;
+
+		//*u11 *= *u10;
+
+		FHEuint * u12 = add(u11, u11);
+
+		uint64_t realSum = 0;
+		for (int i = 0; i < 12; i++)
+			realSum += nr[i];
+		
+		realSum *= 2 * (nr[8] + nr[9]);
+
+		if (u12 -> decrypt(sek) != realSum)
+			std::cout << "problem\n";
+		else
+			std::cout << "ok\n";
+
+		//std::cout << u11 -> decrypt(sek) << " " << realSum;
+	}
+
+	std::cout << "done\n";
+}
+
+void addMulPermTest(SecretKey * sek, SecretKey * sekp, Context * ctt, Permutation * perm) {
+
+	for (int t = 0; t < 10; t++) {
+
+		uint64_t * nr = new uint64_t[16];
+
+		FHEuint * u = new FHEuint[16];
+
+		for (int i = 0; i < 16; i++) {
+
+			nr[i] = rand() % 100;
+			u[i] = FHEuint(nr[i], sek, ctt);
+		}
+
+		FHEuint * u1 = add(u, u + 1);
+		FHEuint * u2 = add(u + 2, u + 3);
+		FHEuint * u3 = add(u + 4, u + 5);
+		FHEuint * u4 = add(u + 6, u + 7);
+		FHEuint * u5 = add(u + 8, u + 9);
+		FHEuint * u6 = add(u + 10, u + 11);
+
+		FHEuint * u7 = add(u1, u2);
+		FHEuint * u8 = add(u3, u4);
+		FHEuint * u9 = add(u5, u6);
+
+		FHEuint * u10 = add(u7, u8);
+		FHEuint * u11 = add(u10, u9);
+
+		//*u10 *= *u3;
+		*u11 *= *u5;
+
+		//*u11 *= *u10;
+
+		FHEuint * u12 = add(u11, u11);
+
+		uint64_t realSum = 0;
+		for (int i = 0; i < 12; i++)
+			realSum += nr[i];
+
+		realSum *= 2 * (nr[8] + nr[9]);
+
+		FHEuint & cp = u12 -> getPermutedCopy(*perm);
+
+		if (u12 -> decrypt(sek) != realSum || u12 -> decrypt(sek) != cp.decrypt(sekp))
+			std::cout << "problem\n";
+		else
+			std::cout << "ok\n";
+
+		//std::cout << u11 -> decrypt(sek) << " " << realSum;
+	}
+
+	std::cout << "done\n";
+}
+
+//----------------------------------
+
 int main() {
 
 	Library::initializeLibrary();
 	Context context(1247, 16);
 	SecretKey sk(context);
 
-	sek = &sk;
-	ctt = &context;
-
-	// testMultiply();
-	FHEuint * x = new FHEuint(18, sek, ctt);
-	FHEuint k(100, &sk, &context);
-	*x *= k;
+	Permutation p(context);
+	SecretKey skp = sk.applyPermutation(p);
 	
-	std::cout << x -> decrypt(sek);
-	
-	
-
-	//std::cout << x.c.getContext().getDefaultN() << '\n';
-
-	//FHEuint * z = multiply(x, &y);
-	
-	/*int m = 10;
-	int n = 7;
-	
-	for (int k = 0; k <= m + n; k++) {
-		for (int a = max(0, k - m); a <= min(n, k); a++) 
-			for (int b = min(m, k); b >= max(0, k - n); b--)
-				if(a + b == k)
-					std::cout << a << " " << b << " | ";
-			
-		std::cout << '\n';
-	}*/
+	addMulPermTest(&sk, &skp, &context, &p);
 
 	return 0;
 }
